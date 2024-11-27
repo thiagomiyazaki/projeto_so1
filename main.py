@@ -10,6 +10,13 @@ import datetime
 
 
 class ContextManager:
+    """
+        distro_points_lock: variável de trava utilizada para evitar condições de corrida no acesso aos atributos
+        distro_points: lista de objetos dos pontos de distribuição
+        packages: lista de objetos de encomenda
+        cars: lista de objetos dos carros
+        shutdown: variável utilizada para determinar que o programa deve ser encerrado (finalizando as threads)
+    """
     distro_points_lock = threading.Lock()
     distro_points: List[DistroPoint] = []
     packages: List[Package] = []
@@ -19,12 +26,14 @@ class ContextManager:
 
     @classmethod
     def create_objects(cls, qt_dpoints, qt_cars, qt_pkgs, capacity):
+        # cria os objetos segundo os argumentos passados na invocação do programa
         cls.create_dpoints(qt_dpoints)
         cls.create_pkgs(qt_pkgs, qt_dpoints)
         cls.create_cars(qt_cars, qt_dpoints, capacity)
 
     @classmethod
     def start_threads(cls):
+        # inicia as threads de pto de distribuição, encomendas e carros
         for dpoints in cls.distro_points:
             dpoints.start()
 
@@ -36,11 +45,13 @@ class ContextManager:
 
     @classmethod
     def create_dpoints(cls, qt_dpoints):
+        # cria objetos de ptos de distribuicao
         for i in range(qt_dpoints):
             cls.distro_points.append(DistroPoint(f'DPoint_{i}'))
 
     @classmethod
     def create_pkgs(cls, qt_packages, qt_dpoints):
+        # cria objetos encomenda - definindo seus pontos de origem, destino, e setando o horario de sua criacao
         for i in range(qt_packages):
             name = f'Package_{i}'
             src = rint(0, qt_dpoints-1)
@@ -55,6 +66,7 @@ class ContextManager:
 
     @classmethod
     def create_cars(cls, qt_cars, qt_dpoints, capacity):
+        # cria os objetos carros e define o seu ponto de partida
         for i in range(qt_cars):
             # Car(self, name, capacity, cur_state)
             cls.cars.append(
@@ -63,17 +75,21 @@ class ContextManager:
 
     @classmethod
     def get_list_of_distro_points_size(cls):
+        # retorna a quantidade de pontos de distribuição
         with cls.distro_points_lock:
             return len(cls.distro_points)
 
     @classmethod
     def get_distro_point_by_index(cls, index):
+        # retorna um objeto ponto de distribuicao de acordo com seu index
         with cls.distro_points_lock:
             return cls.distro_points[index]
 
     @classmethod
     def check_termination(cls):
+        # se a quantidade de encomenda entregues for igual à quantidade total de encomendas - terminar as threads
         def remaining_packages():
+            # verifica se ainda há encomendas a serem entregues
             with cls.distro_points_lock:
                 count = 0
                 for dp in cls.distro_points:
@@ -98,10 +114,9 @@ class Car(threading.Thread):
         self.current_state = cur_state
         self.iteration = 0
 
-    # add_to_buffer(self, req_type, car: Car, pkg: Package = None):
     def run(self):
         while not ContextManager.shutdown:
-
+            # visita o próximo ponto de distribuição
             self.visit_next()
             distro_point = ContextManager.get_distro_point_by_index(self.current_state)
 
@@ -126,15 +141,18 @@ class Car(threading.Thread):
                     self.packages.append(new_pkg)
                     print(f'{self.name=} picking up {new_pkg}')
 
+    # dado que o carro está no ponto de distribuição P, visita o ponto P+1 (desde que P+1 exista)
     def visit_next(self):
         print(f'{self.name=} departing from {self.current_state}')
         self.iteration = self.current_state + 1
         self.current_state = 'travelling'
         sleep(rint(1, 10)/10)
+        # evita estourar e implementa a fila "circular"
         self.current_state = self.iteration % ContextManager.get_list_of_distro_points_size()
         print(f'{self.name=} going to {self.current_state}')
         sleep(0.1)
 
+    # dado o ponto de distro atual P - verifica se existem pacotes no "porta-mala" que devem ser entregues em P
     def check_delivery(self):
         for pkg in self.packages:
             if f'Dpoint_{self.current_state}' == pkg.dest:
@@ -155,6 +173,7 @@ class Package(threading.Thread):
         self.car = None
 
     def run(self):
+        # fica esperando que o atributo arrival mude seu estado - caso mude, isto indica que o pacote foi entregue
         while self.arrival is None:
             sleep(1)
         print(f'!------ DELIVERED {self.name=} --------!')
@@ -208,17 +227,23 @@ class DistroPoint(threading.Thread):
         self.condition = Condition()  # Use a Condition instead of a plain Lock
 
     def run(self):
+        # fica lendo o buffer de requisições - assim que chega uma nvoa requisição ela deve ser lida e ao final da
+        # leitura uma notificação deve ser enviada às threads que estão em wait no mesmo lock/condição
         while True and not ContextManager.shutdown:
             with self.condition:
                 if self.request_buffer:
                     request = self.request_buffer[0]
                     if not request['processed']:
                         if request['type'] == 'hand' and self.outgoing_pkg:
+                            # retorna um pacote para carregar no carro
                             request['result'] = self.outgoing_pkg.pop(0)
                             request['processed'] = True
+                            # notifica que terminou de processar a requisição e que o processamento da thread parada
+                            # pode continuar
                             self.condition.notify_all()
                         elif request['type'] == 'receive':
                             self.incoming_pkg.append(request['pkg'])
+                            # confirma o recebimento do pacote
                             request['result'] = 'received'
                             request['processed'] = True
                             self.condition.notify_all()
@@ -232,6 +257,7 @@ class DistroPoint(threading.Thread):
                 if pkg.get_name() == item.get_name():
                     return item
 
+    # adiciona uma requisição ao buffer de requisições
     def add_to_buffer(self, req_type: object, car: Car, pkg: Package = None) -> None | str | Package:
         with self.condition:
             if req_type == 'hand' and not self.outgoing_pkg:
@@ -240,6 +266,8 @@ class DistroPoint(threading.Thread):
             # request types: receive or hand
             self.request_buffer.append(request)
             while request['result'] is None:
+                # enquanto a requisição não for processada, a thread deve esperar - apenas uma thread pode ser atendida
+                # por vez
                 self.condition.wait()
             result = request['result']
             for item in self.request_buffer[:]:
@@ -249,6 +277,7 @@ class DistroPoint(threading.Thread):
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # pega os argumentos da linha de comando
     parser = argparse.ArgumentParser(
         prog='project',
     )
@@ -269,6 +298,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help='Available space',
     )
 
+    # coloca os argumentos nas variáveis
     args = parser.parse_args(argv)
     packages = int(args.p)
     cars = int(args.c)
@@ -276,10 +306,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     distro_points = int(args.s)
     print(f'{args=}')
 
+    # passa os parâmetros para a criação dos objetos
     ContextManager.create_objects(distro_points, cars, packages, available_space)
     ContextManager.qt_pkgs = packages
+
+    # inicia a thread que verifica se o programa deve terminar (indicando que as outras threads devem parar)
     thread = threading.Thread(target=ContextManager.check_termination)
     thread.start()
+
+    # inicia as threads de Pontos de Distro, Carros e Encomendas
     ContextManager.start_threads()
 
     return 0
