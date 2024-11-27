@@ -49,8 +49,9 @@ A resposta pode ser:
     - Um objeto Package, indicando que lhe foi entre uma encomenda. Esta é então inserida nos itens presente no carro ("porta-malas).
 
 Existe uma thread que controla o término da execução do programa, que roda a função ContextManager.check_termination:
-    - Dada uma quantidade de encomendas N requisitada na invocação do programa e E, o valor dado pela soma da quantidade
-    de itens na fila de entrada de todos os Pontos de Distribuição - caso E == N, então check_termination muda o valor
-    do atributo ContextManager.shutdown para True, indicando para as outras threads que elas devem terminar suas execuções.
 
-    - Note que, caso E < N, então ainda existem encomendas que precisam ser entregues.
+- Dada uma quantidade de encomendas N requisitada na invocação do programa e E, o valor dado pela soma da quantidade
+de itens na fila de entrada de todos os Pontos de Distribuição - caso E == N, então check_termination muda o valor
+do atributo ContextManager.shutdown para True, indicando para as outras threads que elas devem terminar suas execuções.
+
+- Note que, caso E < N, então ainda existem encomendas que precisam ser entregues.
